@@ -306,7 +306,211 @@ Background Linux services
 
 Always-on development environments
 
-15. Summary
+15. 🔐 Auto-Login Setup (Optional)
+
+This section explains how to configure Windows automatic login for a dedicated service user so that WSL can start automatically after boot, even before switching to another user.
+
+Purpose
+
+Auto-login is useful when:
+
+WSL must start automatically every day
+
+Linux services must remain running in the background
+
+You want to switch to another Windows user for daily work
+
+Recommended pattern:
+
+Windows boots
+
+Service user logs in automatically
+
+WSL auto-starts via scheduled task
+
+You Switch User to your personal account
+
+⚠️ Security Warning (Read First)
+
+Auto-login stores the user password on the system
+
+Anyone with physical access can access the auto-logged-in account
+
+Do NOT use your personal Windows account
+
+Use a dedicated service account only
+
+Option A: Enable Auto-Login via netplwiz (Preferred)
+Prerequisite
+
+Windows Hello enforcement must be disabled.
+
+Steps
+
+Open Settings
+
+Go to:
+
+Accounts → Sign-in options
+
+
+Under Additional settings, turn OFF:
+
+“For improved security, only allow Windows Hello sign-in for Microsoft accounts on this device”
+
+
+Reboot or sign out
+
+Press Win + R
+
+Type:
+
+netplwiz
+
+
+Select the service user
+
+Uncheck:
+
+Users must enter a user name and password to use this computer
+
+
+Click Apply
+
+Enter the user password once
+
+Reboot
+
+✅ Windows will now auto-login using this user.
+
+Option B: Enable Auto-Login via Registry (Most Reliable)
+
+Use this method if the checkbox does not appear or if Windows Hello must remain enabled.
+
+Steps
+
+Press Win + R
+
+Type:
+
+regedit
+
+
+Navigate to:
+
+HKEY_LOCAL_MACHINE
+└─ SOFTWARE
+   └─ Microsoft
+      └─ Windows NT
+         └─ CurrentVersion
+            └─ Winlogon
+
+
+Create or update the following values:
+
+Name	Type	Value
+AutoAdminLogon	REG_SZ	1
+DefaultUserName	REG_SZ	<ServiceUser>
+DefaultPassword	REG_SZ	<Password>
+DefaultDomainName	REG_SZ	.
+
+Close Registry Editor
+
+Reboot
+
+✅ Windows will auto-login as the service user.
+
+Verify Auto-Login + WSL Startup
+
+After reboot:
+
+wsl -l -v
+
+
+Expected output:
+
+Ubuntu    Running    2
+
+🛡️ Secure Hardening Checklist (Strongly Recommended)
+
+When using auto-login, apply the following hardening measures.
+
+Account Isolation
+
+ Use a dedicated service user
+
+ No browsing, email, or personal data
+
+ No daily work under this account
+
+Privilege Control
+
+ Remove admin rights after setup (if not required)
+
+ Keep admin access only if WSL services require it
+
+ Do not use SYSTEM account for WSL
+
+Physical & Local Security
+
+ Enable BitLocker
+
+ Configure automatic screen lock
+
+ Require password on wake
+
+ Disable guest accounts
+
+Network & Access Control
+
+ Disable RDP for the service user (if not needed)
+
+ Restrict firewall access where possible
+
+ Avoid exposing WSL services unnecessarily
+
+WSL & Service Best Practices
+
+ Use systemd services, not user services
+
+ Add network dependency to services:
+
+After=network-online.target
+Wants=network-online.target
+
+
+ Monitor long-running services
+
+ Restart WSL periodically if uptime is critical
+
+Recovery & Rollback
+
+ Document auto-login changes
+
+ Keep uninstall.ps1 accessible
+
+ Know how to disable auto-login (registry or netplwiz)
+
+Disable Auto-Login (Rollback)
+
+To disable auto-login:
+
+netplwiz
+
+Re-enable:
+
+Users must enter a user name and password to use this computer
+
+Registry
+
+Set:
+
+AutoAdminLogon = 0
+
+
+Reboot.
+
+16. Summary
 
 This project provides a robust, repeatable, and Microsoft-compliant way to:
 
