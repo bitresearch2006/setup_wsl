@@ -1,4 +1,4 @@
-# =========================================
+﻿# =========================================
 # Fully Automated WSL Setup (Two-Phase)
 # =========================================
 
@@ -8,13 +8,7 @@ $SCRIPT     = $MyInvocation.MyCommand.Path
 $DISTRO     = "Ubuntu"
 
 function Register-PostBootTask {
-    schtasks /create `
-      /tn $TASK_NAME `
-      /tr "powershell.exe -ExecutionPolicy Bypass -File `"$SCRIPT`"" `
-      /sc onlogon `
-      /ru "$env:USERNAME" `
-      /rl HIGHEST `
-      /f
+    schtasks /create /tn $TASK_NAME /tr "powershell.exe -ExecutionPolicy Bypass -File `"$SCRIPT`"" /sc onlogon /ru "$env:USERNAME" /rl HIGHEST /f
 }
 
 function Remove-PostBootTask {
@@ -29,9 +23,7 @@ if (-not ([Security.Principal.WindowsPrincipal] `
 ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
 
     Write-Host "Re-launching script as Administrator..."
-    Start-Process powershell `
-        -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" `
-        -Verb RunAs
+    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
@@ -90,86 +82,68 @@ $PASSWORD_PLAIN = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
 # Create Linux user
 $USER_LINE = "$LINUX_USER`:$PASSWORD_PLAIN"
 
-wsl -d $DISTRO -- bash -c "
-id $LINUX_USER >/dev/null 2>&1 || (
-    useradd -m -s /bin/bash $LINUX_USER &&
-    printf '%s\n' '$USER_LINE' | chpasswd &&
-    usermod -aG sudo $LINUX_USER
-)
-"
+wsl -d Ubuntu -- bash -c "id $LINUX_USER >/dev/null 2>&1 || useradd -m -s /bin/bash $LINUX_USER && echo '$USER_LINE' | chpasswd && usermod -aG sudo $LINUX_USER"
 
 # Set default WSL user
-wsl -d $DISTRO -- bash -c "
-tee /etc/wsl.conf >/dev/null <<EOF
-[user]
-default=$LINUX_USER
-EOF
-"
+wsl -d Ubuntu -- bash -c "printf '[user]\ndefault=%s\n' '$LINUX_USER' > /etc/wsl.conf"
 
 # Cleanup
 Remove-PostBootTask
 Remove-Item $STATE_FILE -Force
 
 wsl --shutdown
-
-
-Write-Host ""
-Write-Host "=== Verifying WSL Setup Completion ===" -ForegroundColor Cyan
-
 # ------------------------------
 # Phase 3 (Post-Verification)
 # ------------------------------
 
-$DISTRO = "Ubuntu"
-$EXPECTED_USER = $LINUX_USER
-$success = $true
+function Verify-WSLSetup {
+    Write-Host ""
+    Write-Host "=== Verifying WSL Setup Completion ===" -ForegroundColor Cyan
 
-# 1. Verify distro exists
-$distros = wsl -l -q 2>$null
-if ($distros -notcontains $DISTRO) {
-    Write-Host "❌ Ubuntu distro not found" -ForegroundColor Red
-    $success = $false
-} else {
-    Write-Host "✔ Ubuntu distro found"
+    $DISTRO = "Ubuntu"
+    $EXPECTED_USER = $LINUX_USER
+    $success = $true
+
+    $distros = wsl -l -q
+    if ($distros -notcontains $DISTRO) {
+        Write-Host "❌ Ubuntu distro not found" -ForegroundColor Red
+        $success = $false
+    } else {
+        Write-Host "✔ Ubuntu distro found"
+    }
+
+    wsl -d $DISTRO -- bash -c "id $EXPECTED_USER" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Linux user '$EXPECTED_USER' does not exist" -ForegroundColor Red
+        $success = $false
+    } else {
+        Write-Host "✔ Linux user '$EXPECTED_USER' exists"
+    }
+
+    $defaultUser = (wsl -d $DISTRO -- bash -c "whoami").Trim()
+    if ($defaultUser -ne $EXPECTED_USER) {
+        Write-Host "❌ Default WSL user is '$defaultUser' (expected '$EXPECTED_USER')" -ForegroundColor Red
+        $success = $false
+    } else {
+        Write-Host "✔ Default WSL user is '$EXPECTED_USER'"
+    }
+
+    $wslConf = wsl -d $DISTRO -- bash -c "grep -E '^default=' /etc/wsl.conf"
+    if ($wslConf -notmatch "default=$EXPECTED_USER") {
+        Write-Host "❌ /etc/wsl.conf not configured correctly" -ForegroundColor Red
+        $success = $false
+    } else {
+        Write-Host "✔ /etc/wsl.conf configured"
+    }
+
+    Write-Host ""
+    if ($success) {
+        Write-Host "WSL installation COMPLETED SUCCESSFULLY" -ForegroundColor Green
+    } else {
+        Write-Host "WSL installation INCOMPLETE - please re-run install.ps1" -ForegroundColor Yellow
+    }
+
+    Read-Host "Press ENTER to close this window"
 }
 
-# 2. Verify user exists inside WSL
-$userCheck = wsl -d $DISTRO -- bash -c "id $EXPECTED_USER" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Linux user '$EXPECTED_USER' does not exist" -ForegroundColor Red
-    $success = $false
-} else {
-    Write-Host "✔ Linux user '$EXPECTED_USER' exists"
-}
-
-# 3. Verify default user
-$defaultUser = wsl -d $DISTRO -- bash -c "whoami" 2>$null
-if ($defaultUser.Trim() -ne $EXPECTED_USER) {
-    Write-Host "❌ Default WSL user is '$defaultUser' (expected '$EXPECTED_USER')" -ForegroundColor Red
-    $success = $false
-} else {
-    Write-Host "✔ Default WSL user is '$EXPECTED_USER'"
-}
-
-# 4. Verify wsl.conf
-$wslConf = wsl -d $DISTRO -- bash -c "grep -E '^default=' /etc/wsl.conf 2>/dev/null"
-if ($wslConf -notmatch "default=$EXPECTED_USER") {
-    Write-Host "❌ /etc/wsl.conf not configured correctly" -ForegroundColor Red
-    $success = $false
-} else {
-    Write-Host "✔ /etc/wsl.conf configured"
-}
-
-# 5. Final result
-Write-Host ""
-if ($success) {
-    Write-Host "🎉 WSL installation COMPLETED SUCCESSFULLY" -ForegroundColor Green
-} else {
-    Write-Host "⚠ WSL installation INCOMPLETE — please re-run install.ps1" -ForegroundColor Yellow
-}
-
-# 6. Wait before closing
-Write-Host ""
-Write-Host "Press ENTER to close this window..."
-[void][System.Console]::ReadLine()
-
+Verify-WSLSetup

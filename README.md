@@ -45,6 +45,7 @@ Right-click Start
 Select Windows Terminal (Admin) or PowerShell (Admin)
 
 2️⃣ Allow script execution (session only)
+
 Set-ExecutionPolicy RemoteSigned -Scope Process
 
 3️⃣ Run the install script
