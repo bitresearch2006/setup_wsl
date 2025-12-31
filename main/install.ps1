@@ -15,6 +15,11 @@ function Remove-PostBootTask {
     schtasks /delete /tn $TASK_NAME /f 2>$null
 }
 
+function Register-WSLAutoStart {
+    schtasks /create /tn "WSL-AutoStart" /tr "wsl -d Ubuntu -e true" /sc onlogon /ru "$env:USERNAME" /rl HIGHEST /f
+
+}
+
 # -----------------------------------------
 # Ensure script is running as Administrator
 # -----------------------------------------
@@ -75,6 +80,10 @@ Write-Host "=== Phase 2: User Setup ===" -ForegroundColor Green
 # Ask user credentials
 $LINUX_USER = Read-Host "Enter Linux username"
 $PASSWORD_SECURE = Read-Host "Enter Linux password" -AsSecureString
+if ([string]::IsNullOrWhiteSpace($LINUX_USER)) {
+    Write-Host "Linux username cannot be empty." -ForegroundColor Red
+    exit 1
+}
 $PASSWORD_PLAIN = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($PASSWORD_SECURE)
 )
@@ -92,6 +101,9 @@ Remove-PostBootTask
 Remove-Item $STATE_FILE -Force
 
 wsl --shutdown
+# Enable persistent WSL auto-start at every login
+Register-WSLAutoStart
+
 # ------------------------------
 # Phase 3 (Post-Verification)
 # ------------------------------
@@ -138,7 +150,7 @@ function Verify-WSLSetup {
 
     Write-Host ""
     if ($success) {
-        Write-Host "WSL installation COMPLETED SUCCESSFULLY" -ForegroundColor Green
+        Write-Host "WSL installation COMPLETED SUCCESSFULLY WSL strted in automatically from next boot" -ForegroundColor Green
     } else {
         Write-Host "WSL installation INCOMPLETE - please re-run install.ps1" -ForegroundColor Yellow
     }

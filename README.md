@@ -1,115 +1,157 @@
+
 WSL Automated Setup with Auto-Start
+1. Description
 
-This project provides PowerShell automation scripts to install, configure, and cleanly uninstall Windows Subsystem for Linux (WSL 2) with Ubuntu, including automatic startup at Windows boot.
+This project provides PowerShell automation scripts to install, configure, verify, and cleanly uninstall Windows Subsystem for Linux (WSL 2) with Ubuntu.
 
-The setup is designed for background services, tunnels, Docker, ROS, and systemd-based workloads.
+The setup is designed for scenarios where Linux services must be available automatically after Windows login, such as:
 
-📌 Features
+Background services
 
-Enable WSL and Virtual Machine Platform
+Tunnels (autossh)
 
-Install Ubuntu (WSL 2)
+Docker workloads
 
-Prompt for Linux username & password
+ROS / robotics
 
-Create Linux user automatically
+systemd-based daemons
 
-Set default WSL user
+Development and CI environments
 
-Auto-start WSL at Windows boot
+The solution follows Microsoft-supported WSL behavior and avoids unsupported hacks.
 
-Support systemd services without interactive login
+2. How This Works (Concept Overview)
 
-Clean uninstall & rollback support
+WSL itself does not start at Windows boot
 
-🖥️ Supported Systems
+WSL is started on user logon using a Windows Scheduled Task
 
-Windows 10 (2004 / Build 19041+)
+When WSL starts:
+
+systemd is initialized automatically
+
+Enabled Linux services start without login or password
+
+The installer runs in two phases:
+
+Phase 1: Enable WSL + install Ubuntu (requires reboot)
+
+Phase 2: Create Linux user, configure defaults, enable auto-start
+
+After setup completes:
+
+WSL starts automatically at every Windows login
+
+No further user action is required
+
+3. Prerequisites
+Supported Systems
+
+Windows 10 (Version 2004 / Build 19041 or later)
 
 Windows 11
 
-Administrator privileges required
+System Requirements
+
+Administrator privileges
 
 BIOS virtualization enabled (Intel VT-x / AMD-V)
 
-📂 Files
+Internet connectivity
+
+PowerShell Requirements
+
+Windows PowerShell 5.1 (default)
+
+Scripts saved as UTF-8 with BOM (important)
+
+4. Project Structure
 File	Purpose
-install.ps1	Install & configure WSL
-uninstall_wsl_setup.ps1	Revert all changes
+install.ps1	Install & configure WSL with auto-start
+uninstall.ps1	Cleanly revert all changes
 README.md	Documentation
-🚀 Installation & Setup
-1️⃣ Open PowerShell as Administrator
+5. Installation Instructions
+5.1 Open PowerShell as Administrator
 
 Right-click Start
 
 Select Windows Terminal (Admin) or PowerShell (Admin)
 
-2️⃣ Allow script execution (session only)
-
+5.2 Allow Script Execution (current session only)
 Set-ExecutionPolicy RemoteSigned -Scope Process
 
-3️⃣ Run the install script
+5.3 Run Install Script
 .\install.ps1
 
-🔁 First-Run Requirement (Important)
+6. Installation Flow (What to Expect)
+Phase 1 – WSL Installation
 
-On the first execution:
+During the first run:
 
-Windows features are enabled
+WSL features are enabled
 
-Ubuntu is installed
+Ubuntu (WSL 2) is installed
 
-Windows reboot is required
+A reboot is required
 
-You will see:
+You will be prompted:
 
-Ubuntu installed. Please RESTART Windows and re-run this script.
+WSL installation requires a reboot. Reboot now? (Y/N)
 
 
-👉 Restart Windows
-👉 Run the same script again as Administrator
+➡️ Reboot Windows
+➡️ Log in again
+➡️ The setup automatically resumes
 
-👤 Linux User Creation
+Phase 2 – Linux User Setup
 
-On the second run, the script will prompt:
+After reboot and login, the script resumes automatically and prompts:
 
 Enter Linux username:
 Enter Linux password:
 
 
-Actions performed:
+The script then:
 
-Linux user is created
+Creates the Linux user
 
-User is added to sudo
+Adds the user to sudo
 
-User is set as default WSL user
+Sets the user as default WSL user
 
-Auto-start task is registered
+Enables WSL auto-start at login
+
+Performs verification
+
+Cleans up temporary tasks
 
 The script is idempotent and safe to re-run.
 
-🔄 Automatic WSL Startup
+7. WSL Auto-Start Behavior
+What “Auto-Start” Means
 
-A Windows Task Scheduler entry is created:
+WSL does NOT start at Windows kernel boot
 
-Task name: AutoStartWSL
+WSL starts automatically at every user login
 
-Trigger: Windows boot
+This is the earliest supported and stable method
 
-Run as: SYSTEM
+How It Is Implemented
 
-Starts WSL silently in background
+A persistent scheduled task is created:
 
-Verify
-schtasks /query /tn AutoStartWSL
+Property	Value
+Task name	WSL-AutoStart
+Trigger	User logon
+Run as	Logged-in user
+Privileges	Highest
+Action	wsl -d Ubuntu -e true
 
-Test without reboot
-schtasks /run /tn AutoStartWSL
+This starts WSL silently in the background.
 
-⚙️ systemd Support (Recommended)
+8. systemd Support (Recommended)
 
-To run Linux services automatically:
+To enable Linux services at WSL startup:
 
 sudo tee /etc/wsl.conf <<EOF
 [boot]
@@ -122,14 +164,33 @@ Restart WSL:
 wsl --shutdown
 
 
-✔ systemd starts automatically
-✔ No login or password required
-✔ Enabled services start at boot
+Result:
 
-🧪 Verification
+systemd starts automatically
+
+Enabled services start without login
+
+No password prompt required
+
+9. Verification
+Verify WSL is Running
+wsl -l -v
+
+
+Expected:
+
+Ubuntu    Running    2
+
+Verify Default User
 wsl
-
 whoami
+
+
+Expected:
+
+<your-username>
+
+Verify systemd
 ps -p 1 -o comm=
 
 
@@ -137,88 +198,126 @@ Expected:
 
 systemd
 
-🧹 Uninstall & Rollback
+10. Uninstall Instructions
+10.1 What Uninstall Does
 
-Use this when you want to completely revert everything done by the install script.
+The uninstall script:
 
-⚠️ Warning
+Disables WSL auto-start
 
-Uninstalling will:
+Removes all scheduled tasks
 
-Permanently delete the Ubuntu WSL filesystem
+Deletes setup state files
 
-Remove Linux users and configuration
+Shuts down WSL
 
-Remove auto-start behavior
+Optionally unregisters Ubuntu
 
-▶️ Uninstall Steps
-1️⃣ Open PowerShell as Administrator
-2️⃣ Run uninstall script
-.\uninstall_wsl_setup.ps1
+10.2 Run Uninstall
 
-3️⃣ Optional prompt
+Open PowerShell as Administrator and run:
 
-The script will ask:
+.\uninstall.ps1
 
-Disable WSL Windows features as well? (y/N)
+
+You will be prompted:
+
+Do you want to UNREGISTER the Ubuntu distro? (Y/N)
 
 Choice	Result
-y	Fully removes WSL from Windows (reboot required)
-N	Keeps WSL enabled but removes Ubuntu
-🧪 Verify Uninstall
-Check distros
-wsl -l
+Y	Completely removes Ubuntu (data deleted)
+N	Keeps Ubuntu, removes automation
+10.3 Verify Uninstall (Optional)
+schtasks /query | findstr WSL
 
 
 Expected:
 
-No installed distributions.
+(no output)
 
-Check startup task
-schtasks /query /tn AutoStartWSL
-
-
-Expected:
-
-ERROR: The system cannot find the file specified.
-
-Check WSL status (if disabled)
-wsl --status
+wsl -l -v
 
 
-Expected:
+Ubuntu should be Stopped or unregistered.
 
-WSL is not installed.
+11. Possible Failures & Troubleshooting
+1️⃣ Script Parsing Errors
 
-🔐 Security Notes
+Ensure scripts are saved as UTF-8 with BOM
 
-Linux passwords are never stored
+Avoid emojis or special Unicode characters
 
-Scripts must be run as Administrator
+Avoid multiline PowerShell backticks
 
-Startup task runs as SYSTEM for reliability
+2️⃣ Bash $'\r' Errors
 
-No interactive Linux login required for services
+Do not use multiline bash -c commands
 
-🧩 Common Use Cases
+Ensure commands are single-line
 
-autossh / tunnel services
+3️⃣ WSL Not Auto-Starting
 
-Docker / container workloads
+Verify scheduled task:
 
-ROS 2 nodes
+schtasks /query /tn WSL-AutoStart
 
-Always-on Linux daemons
 
-CI / development environments
+Verify user logon occurred (not just boot)
 
-📝 Notes
+4️⃣ Default User is root
 
-User-level systemd services (systemctl --user) do not auto-start
+Indicates Phase 2 did not complete
 
-Use system-level services for boot tasks
+Re-run install.ps1
 
-Network-dependent services should include:
+12. Recommendations & Best Practices
+
+Use system-level systemd services, not user services
+
+Add network dependencies for services:
 
 After=network-online.target
 Wants=network-online.target
+
+
+Keep installer scripts ASCII-only
+
+Avoid modifying scheduled tasks manually
+
+13. Security Notes
+
+Linux passwords are never stored
+
+Passwords are cleared from memory after use
+
+Scheduled tasks run with minimal scope
+
+No interactive Linux login required for services
+
+14. Common Use Cases
+
+autossh tunnels
+
+Docker / containers
+
+ROS 2 nodes
+
+Background Linux services
+
+Always-on development environments
+
+15. Summary
+
+This project provides a robust, repeatable, and Microsoft-compliant way to:
+
+Install WSL 2
+
+Configure Linux users
+
+Enable systemd
+
+Start WSL automatically at login
+
+Cleanly uninstall everything
+
+It is suitable for production, research, and automation environments.
