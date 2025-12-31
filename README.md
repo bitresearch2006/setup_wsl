@@ -163,41 +163,49 @@ Your WSL README should keep:
 
 With numbered scenarios, not paragraphs.
 
+
 🔹 9. Recommendations / Best Practices (final section)
 
 This aligns well with faasd “production mindset”.
 
-## Windows Auto-Login (Optional)
+---
 
-This section explains how to configure Windows automatic login for a dedicated service user so that WSL starts automatically after system boot.
+Windows Auto-Login (Optional)
 
-This is useful when:
+This section describes how to configure automatic Windows login for a dedicated service user so that WSL starts automatically after system boot.
+
+This is intended only for background service usage.
+
+When to Use Auto-Login
+
+Use auto-login if:
 
 WSL must run continuously
 
-Linux services should remain active in the background
+Linux services must start without manual login
 
 You want to switch to another Windows user for daily work
 
-## Important Notes
+Important Notes
 
 Auto-login stores the user password on the system
 
-Do NOT use your personal Windows account
+Do not use a personal Windows account
 
 Always use a dedicated service user
 
-This setup is intended for background services only
+Recommended only for controlled environments
 
-Option 1: Auto-Login Using netplwiz (Preferred)
+Option 1: Auto-Login Using netplwiz
+Prerequisite
 
-This option requires disabling the Windows Hello enforcement toggle.
+Windows Hello enforcement must be disabled.
 
-## Steps
+Steps
 
 Open Settings
 
-Navigate to:
+Go to:
 
 Accounts → Sign-in options
 
@@ -207,7 +215,7 @@ Under Additional settings, turn OFF:
 For improved security, only allow Windows Hello sign-in for Microsoft accounts on this device
 
 
-Reboot or sign out
+Sign out or reboot
 
 Press Win + R
 
@@ -228,5 +236,3 @@ Click Apply
 Enter the password once
 
 Reboot
-
-✅ Windows will now auto-login using this user.
