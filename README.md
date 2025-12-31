@@ -174,28 +174,6 @@ Windows Auto-Login (Optional)
 
 This section describes how to configure automatic Windows login for a dedicated service user so that WSL starts automatically after system boot.
 
-This is intended only for background service usage.
-
-When to Use Auto-Login
-
-Use auto-login if:
-
-WSL must run continuously
-
-Linux services must start without manual login
-
-You want to switch to another Windows user for daily work
-
-Important Notes
-
-Auto-login stores the user password on the system
-
-Do not use a personal Windows account
-
-Always use a dedicated service user
-
-Recommended only for controlled environments
-
 Option 1: Auto-Login Using netplwiz
 Prerequisite
 
