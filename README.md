@@ -115,6 +115,9 @@ WSL README equivalent:
 ```powershell
 wsl -l -v
 
+## Confirm the task exists
+schtasks /query /tn WSL-AutoStart /v /fo list
+
 Verify Default User
 wsl
 whoami
