@@ -193,30 +193,41 @@ function Invoke-AsAdmin {
     exit
 }
  
-param(
-    [string]$AdminAction
-)
 
 Write-Log "SCRIPT STARTED"
 
 # -------------------------------
 # AdminAction DISPATCH MODE
 # -------------------------------
-if (Get-PhaseDone "") {
-# Admin-only enable
-    Set-PhaseDone "Phase1"
+# -------------------------------
+# AdminAction DISPATCH MODE
+# -------------------------------
+
+if (-not (Get-PhaseDone)) {
+    # Phase 1 – Admin only
     Invoke-AsAdmin Phase1-Enable-WSLFeatures
-    # need to add script for rerun same
+
+    & powershell.exe -ExecutionPolicy Bypass -File "$PSCommandPath"
+    exit
+}else{
+    Set-PhaseDone "Phase1"
 }
-if (Get-PhaseDone "Phase1") {
-# Standard WSL setup
-    Set-PhaseDone "Phase2"
+
+if ((Get-PhaseDone) -eq "Phase1") {
+
+
+    # Phase 2 – Standard user
     Phase2-WSL-Setup
+    Set-PhaseDone "Phase2"
+
 }
-if (Get-PhaseDone "Phase2") {
-# Admin-only cleanup
-    Set-PhaseDone ""
+
+if ((Get-PhaseDone) -eq "Phase2") {
+    # Phase 3 – Admin only
     Invoke-AsAdmin Phase3-Register-WSLAutoStart
-    Set-PhaseDone ""
+
+    Remove-Item -Recurse -Force $STATE_KEY
+    Read-Host "Press ENTER to close this window"
 }
+
 
