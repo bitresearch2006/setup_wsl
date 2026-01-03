@@ -1,11 +1,67 @@
-﻿# =========================================
-# Fully Automated WSL Setup (Two-Phase)
-# =========================================
-
-$STATE_FILE = "C:\ProgramData\wsl_setup_state.txt"
-$TASK_NAME  = "WSL-PostReboot-Setup"
-$SCRIPT     = $MyInvocation.MyCommand.Path
+﻿
+# ------------------------------
+# Globals
+# ------------------------------
 $DISTRO     = "Ubuntu"
+$TASK_NAME  = "WSL-PostBoot"
+$SCRIPT     = $PSCommandPath
+
+# ------------------------------
+# Logging
+# ------------------------------
+function Write-Log {
+    param(
+        [string]$Message,
+        [ValidateSet("INFO","WARN","ERROR")]
+        [string]$Level = "INFO"
+    )
+
+    $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    $color = switch ($Level) {
+        "INFO"  { "Gray" }
+        "WARN"  { "Yellow" }
+        "ERROR" { "Red" }
+    }
+
+    Write-Host "$ts [$env:USERNAME] [$Level] $Message" -ForegroundColor $color
+}
+
+$STATE_KEY = "HKCU:\Software\BitResearch\WSLSetup"
+
+function Get-PhaseDone {
+    param([string]$Phase)
+    (Get-ItemProperty -Path $STATE_KEY -Name $Phase -ErrorAction SilentlyContinue) -ne $null
+}
+
+function Set-PhaseDone {
+    param([string]$Phase)
+    New-Item -Path $STATE_KEY -Force | Out-Null
+    New-ItemProperty -Path $STATE_KEY -Name $Phase -Value 1 -Force | Out-Null
+}
+
+
+# ------------------------------
+# Helpers
+# ------------------------------
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $p  = New-Object Security.Principal.WindowsPrincipal($id)
+    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-WSLFeaturesEnabled {
+    $wsl = dism /online /get-featureinfo /featurename:Microsoft-Windows-Subsystem-Linux |
+           Select-String "State : Enabled"
+    $vm  = dism /online /get-featureinfo /featurename:VirtualMachinePlatform |
+           Select-String "State : Enabled"
+    return ($wsl -and $vm)
+}
+
+function Enable-WSLFeatures {
+    dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+    dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+}
 
 function Register-PostBootTask {
     schtasks /create /tn $TASK_NAME /tr "powershell.exe -ExecutionPolicy Bypass -File `"$SCRIPT`"" /sc onlogon /ru "$env:USERNAME" /rl HIGHEST /f
@@ -20,142 +76,147 @@ function Register-WSLAutoStart {
 
 }
 
-# -----------------------------------------
-# Ensure script is running as Administrator
-# -----------------------------------------
-if (-not ([Security.Principal.WindowsPrincipal] `
-    [Security.Principal.WindowsIdentity]::GetCurrent()
-).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+function Phase1-Enable-WSLFeatures {
+# =========================================================
+# PHASE-1: SYSTEM FEATURE CHECK / ENABLE (ADMIN ONLY)
+# =========================================================
+    if (Test-IsAdmin -and -not (Test-WSLFeaturesEnabled)) {
 
-    Write-Host "Re-launching script as Administrator..."
-    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        Write-Log "PHASE-1: WSL system features NOT enabled"
+
+        # -----------------------------------------------------
+        # This admin process is allowed to do ONLY:
+        #   - Enable WSL features
+        #   - Reboot
+        # -----------------------------------------------------
+        
+        Register-PostBootTask
+        # -----------------------------------------------------
+        # ADMIN CONTEXT (HARD-LIMITED SECTION)
+        # -----------------------------------------------------
+        Write-Log "ADMIN: Enabling WSL system features"
+        Enable-WSLFeatures
+
+        Write-Log "ADMIN: Rebooting system (required)"
+        if ($choice -match '^[Yy]$') {
+            Write-Log "Rebooting system to continue setup..."
+            Restart-Computer -Force
+        } else {
+            Write-Log "Reboot skipped. Please reboot manually to complete setup by rerun this script after restart."
+        }
+
+    }elseif (-not (Test-IsAdmin))
+    {
+        Write-Log "PHASE-1: Required admin privilege"
+    }
+    else
+    {
+
+        Write-Log "PHASE-1: WSL system features already enabled"
+    }
+
+}
+
+function Phase2-WSL-Setup
+{
+# =========================================================
+# PHASE-2: USER-OWNED WSL SETUP (STANDARD USER ONLY)
+# =========================================================
+    Write-Log "PHASE-2: Starting user WSL setup"
+
+    $distros = wsl -l -q 2>$null
+
+    if ($distros -notcontains $DISTRO) {
+        Write-Log "PHASE-2: Installing WSL distro '$DISTRO' for user"
+        wsl --install -d $DISTRO
+    } else {
+        Write-Log "PHASE-2: WSL distro '$DISTRO' already installed"
+    }
+    Write-Log "=== Phase 2: User Setup ===" -ForegroundColor Green
+
+    # Ask user credentials
+    $LINUX_USER = Read-Host "Enter Linux username"
+    $PASSWORD_SECURE = Read-Host "Enter Linux password" -AsSecureString
+    if ([string]::IsNullOrWhiteSpace($LINUX_USER)) {
+        Write-Log "Linux username cannot be empty." -ForegroundColor Red
+        exit 1
+    }
+    $PASSWORD_PLAIN = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($PASSWORD_SECURE)
+    )
+
+    # Create Linux user
+    $USER_LINE = "$LINUX_USER`:$PASSWORD_PLAIN"
+
+    wsl -d Ubuntu -- bash -c "id $LINUX_USER >/dev/null 2>&1 || useradd -m -s /bin/bash $LINUX_USER && echo '$USER_LINE' | chpasswd && usermod -aG sudo $LINUX_USER"
+
+    # Set default WSL user
+    wsl -d Ubuntu -- bash -c "printf '[user]\ndefault=%s\n' '$LINUX_USER' > /etc/wsl.conf"
+}
+
+function Phase3-Register-WSLAutoStart{
+# =========================================================
+# PHASE-3: SYSTEM FEATURE CHECK / ENABLE (ADMIN ONLY)
+# =========================================================
+    if (Test-IsAdmin) {    
+        # Cleanup
+        Remove-PostBootTask
+        Write-Log "PHASE-2: Post-boot task removed"
+
+        Register-WSLAutoStart
+        Write-Log "PHASE-3: WSL auto-start task registered"
+    }
+    else
+    {
+        Write-Log "PHASE-3: Required admin privilege"
+    }    
+}
+
+function Invoke-AsAdmin {
+    param(
+        [Parameter(Mandatory)]
+        [string]$AdminAction
+    )
+
+    if (Test-IsAdmin) {
+        Write-Log "Already admin, executing '$AdminAction'"
+        & $AdminAction
+        return
+    }
+
+    Write-Log "Requesting admin privileges for '$AdminAction'"
+
+    Start-Process powershell `
+        -Verb RunAs `
+        -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`" -AdminAction $AdminAction"
+
     exit
 }
-
-# ------------------------------
-# Phase Detection
-# ------------------------------
-if (!(Test-Path $STATE_FILE)) {
-
-    Write-Host "=== Phase 1: WSL Installation ===" -ForegroundColor Yellow
-
-    # Enable WSL features
-    dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-    dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
-
-    # Set WSL 2 default
-    wsl --set-default-version 2
-
-    # Install Ubuntu
-    $distros = wsl -l -q 2>$null
-    if ($distros -notcontains $DISTRO) {
-        wsl --install -d $DISTRO
-    }
-
-    # Mark phase 1 complete
-    "PHASE1_DONE" | Out-File $STATE_FILE -Force
-
-    # Register auto-resume task (ONLOGON + USER)
-    Register-PostBootTask
-
-    # Ask user permission before reboot
-    $choice = Read-Host "WSL installation requires a reboot. Reboot now? (Y/N)"
-
-    if ($choice -match '^[Yy]$') {
-        Write-Host "Rebooting system to continue setup..."
-        Restart-Computer -Force
-    } else {
-        Write-Host "Reboot skipped. Please reboot manually to complete setup by rerun this script after restart."
-    }
-    exit 0
-
-}
-
-# ------------------------------
-# Phase 2 (Post-Reboot)
-# ------------------------------
-
-Write-Host "=== Phase 2: User Setup ===" -ForegroundColor Green
-
-# Ask user credentials
-$LINUX_USER = Read-Host "Enter Linux username"
-$PASSWORD_SECURE = Read-Host "Enter Linux password" -AsSecureString
-if ([string]::IsNullOrWhiteSpace($LINUX_USER)) {
-    Write-Host "Linux username cannot be empty." -ForegroundColor Red
-    exit 1
-}
-$PASSWORD_PLAIN = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($PASSWORD_SECURE)
+ 
+param(
+    [string]$AdminAction
 )
 
-# Create Linux user
-$USER_LINE = "$LINUX_USER`:$PASSWORD_PLAIN"
+Write-Log "SCRIPT STARTED"
 
-wsl -d Ubuntu -- bash -c "id $LINUX_USER >/dev/null 2>&1 || useradd -m -s /bin/bash $LINUX_USER && echo '$USER_LINE' | chpasswd && usermod -aG sudo $LINUX_USER"
-
-# Set default WSL user
-wsl -d Ubuntu -- bash -c "printf '[user]\ndefault=%s\n' '$LINUX_USER' > /etc/wsl.conf"
-
-# Cleanup
-Remove-PostBootTask
-Remove-Item $STATE_FILE -Force
-
-wsl --shutdown
-# Enable persistent WSL auto-start at every login
-Register-WSLAutoStart
-
-# ------------------------------
-# Phase 3 (Post-Verification)
-# ------------------------------
-
-function Verify-WSLSetup {
-    Write-Host ""
-    Write-Host "=== Verifying WSL Setup Completion ===" -ForegroundColor Cyan
-
-    $DISTRO = "Ubuntu"
-    $EXPECTED_USER = $LINUX_USER
-    $success = $true
-
-    $distros = wsl -l -q
-    if ($distros -notcontains $DISTRO) {
-        Write-Host "❌ Ubuntu distro not found" -ForegroundColor Red
-        $success = $false
-    } else {
-        Write-Host "✔ Ubuntu distro found"
-    }
-
-    wsl -d $DISTRO -- bash -c "id $EXPECTED_USER" *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Linux user '$EXPECTED_USER' does not exist" -ForegroundColor Red
-        $success = $false
-    } else {
-        Write-Host "✔ Linux user '$EXPECTED_USER' exists"
-    }
-
-    $defaultUser = (wsl -d $DISTRO -- bash -c "whoami").Trim()
-    if ($defaultUser -ne $EXPECTED_USER) {
-        Write-Host "❌ Default WSL user is '$defaultUser' (expected '$EXPECTED_USER')" -ForegroundColor Red
-        $success = $false
-    } else {
-        Write-Host "✔ Default WSL user is '$EXPECTED_USER'"
-    }
-
-    $wslConf = wsl -d $DISTRO -- bash -c "grep -E '^default=' /etc/wsl.conf"
-    if ($wslConf -notmatch "default=$EXPECTED_USER") {
-        Write-Host "❌ /etc/wsl.conf not configured correctly" -ForegroundColor Red
-        $success = $false
-    } else {
-        Write-Host "✔ /etc/wsl.conf configured"
-    }
-
-    Write-Host ""
-    if ($success) {
-        Write-Host "WSL installation COMPLETED SUCCESSFULLY WSL strted in automatically from next boot" -ForegroundColor Green
-    } else {
-        Write-Host "WSL installation INCOMPLETE - please re-run install.ps1" -ForegroundColor Yellow
-    }
-
-    Read-Host "Press ENTER to close this window"
+# -------------------------------
+# AdminAction DISPATCH MODE
+# -------------------------------
+if (Get-PhaseDone "") {
+# Admin-only enable
+    Set-PhaseDone "Phase1"
+    Invoke-AsAdmin Phase1-Enable-WSLFeatures
+    # need to add script for rerun same
+}
+if (Get-PhaseDone "Phase1") {
+# Standard WSL setup
+    Set-PhaseDone "Phase2"
+    Phase2-WSL-Setup
+}
+if (Get-PhaseDone "Phase2") {
+# Admin-only cleanup
+    Set-PhaseDone ""
+    Invoke-AsAdmin Phase3-Register-WSLAutoStart
+    Set-PhaseDone ""
 }
 
-Verify-WSLSetup

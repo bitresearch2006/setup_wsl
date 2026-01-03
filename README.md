@@ -1,216 +1,219 @@
-🔹 1. Title & Description (keep concise)
-faasd README style
-# faasd - Lightweight Serverless Setup (bitresearch2006 Edition)
-
-This repository contains a custom installer and configuration for faasd...
-
-WSL README should be
 # Automated WSL Setup with Auto-Start
 
 This repository provides PowerShell automation scripts to install, configure,
-verify, and automatically start WSL 2 (Ubuntu) on Windows systems.
+verify, and automatically start **WSL 2 (Ubuntu)** on Windows systems.
 
+The setup follows a **two-phase installation model** with strict privilege
+separation to ensure WSL is installed and owned by the intended Windows user.
 
-✔ Short
-✔ Clear
-✔ No instructions here
+---
 
-🔹 2. Features / What this Setup Provides
-faasd style
-## Features of this Setup
-* Lightweight
-* Multi-Arch
-* Automated Networking
-
-WSL README equivalent
 ## Features of this Setup
 
 * Fully automated WSL 2 installation
 * Two-phase setup with automatic resume after reboot
+* System-wide WSL feature enablement (admin-only)
+* User-owned Ubuntu installation (no admin ownership leakage)
 * Linux user creation and default user configuration
 * systemd support for background services
 * Automatic WSL start at Windows login
 * Clean uninstall and rollback support
 
+---
 
-✔ Bullet list
-✔ No commands
-✔ No long explanations
-
-🔹 3. Prerequisites (separate & explicit)
-faasd style
-## Prerequisites
-* OS
-* Permissions
-* Ports
-
-WSL README equivalent
 ## Prerequisites
 
 * Windows 10 (2004+) or Windows 11
-* Administrator privileges
+* PowerShell 5.1 or later
+* Administrator privileges (for WSL feature enablement only)
 * Virtualization enabled in BIOS
 * Active internet connection
-* PowerShell 5.1 or later
 
+---
 
-✔ Easy to scan
-✔ No mixing with install steps
-
-🔹 4. Installation section (this is critical)
-faasd style
-
-Numbered steps
-
-Commands clearly isolated
-
-Options clearly separated
-
-WSL README should follow EXACTLY this
 ## Installation
 
-### 1. Open PowerShell as Administrator
+### 1. Open PowerShell
+
+Open **PowerShell as the user who should own WSL**.
+
+> Do **not** permanently run PowerShell as Administrator.
+
+---
 
 ### 2. Allow Script Execution (current session)
 
 ```powershell
 Set-ExecutionPolicy RemoteSigned -Scope Process
-
-3. Run the Installer
-.\install.ps1
-
-
-✔ Each step has **one purpose**  
-✔ Commands never mixed with explanation text  
+```
 
 ---
 
-## 🔹 5. Installation Flow (like “Post-Installation” in faasd)
+### 3. Run the Installer
 
-### faasd style
-```md
-Post-Installation
-Once the script finishes successfully...
+```powershell
+.\install.ps1
+```
 
-WSL equivalent
+---
+
 ## Installation Flow
 
-### Phase 1 – WSL Installation
-### Phase 2 – Linux User Setup
+### Phase 1 – System Preparation (Admin)
 
+* Checks whether WSL Windows features are enabled
+* If not enabled:
 
-✔ Explains what happens
-✔ No commands unless needed
+  * Requests administrator approval
+  * Enables required Windows features
+  * Registers a post-boot resume task
+  * Forces a system reboot
 
-🔹 6. Verification section (explicit)
+No WSL distro is installed in this phase.
 
-faasd does this well with status checks.
+---
 
-WSL README equivalent:
+### Phase 2 – User WSL Setup (Standard User)
+
+* Installs Ubuntu for the logged-in user
+* Prompts for Linux username and password
+* Removes post-boot resume task
+* Registers WSL auto-start at Windows login
+* Verifies installation
+
+This phase never runs in an admin-helper context.
+
+---
 
 ## Verification
+
+After installation completes, verify the setup using the following checks.
 
 ### Verify WSL Status
 
 ```powershell
 wsl -l -v
+```
 
-Verify Default User
-wsl
-whoami
+Expected:
 
-
-✔ Commands isolated  
-✔ Expected behavior explained  
+* Ubuntu is listed
+* Version is `2`
 
 ---
 
-## 🔹 7. Uninstall section (mirrors Installation)
+### Verify Default User
 
-Your updated uninstall section already matches well, but aligned style:
+```powershell
+wsl
+whoami
+```
 
-```md
+Expected:
+
+* Shell opens without errors
+* `whoami` returns your Linux username (not root)
+
+---
+
+### Verify Auto-Start Task
+
+```powershell
+schtasks /query /tn WSL-AutoStart /v /fo list
+```
+
+Expected:
+
+* Task exists
+* Run As User is your Windows user
+
+---
+
 ## Uninstall
 
 ### Run Uninstall Script
 
 ```powershell
 .\uninstall.ps1
+```
 
-What Uninstall Does
+### What Uninstall Does
 
-Removes auto-start task
-
-Shuts down WSL
-
-Optionally unregisters Ubuntu
-
-
-✔ Symmetry with install  
-✔ No hidden behavior  
+* Removes WSL auto-start task
+* Removes post-boot resume task
+* Unregisters Ubuntu (user-owned)
+* Optionally disables WSL Windows features (admin approval required)
+* Reboots only if features are disabled
 
 ---
 
-## 🔹 8. Troubleshooting / Possible Failures (separate)
-
-faasd README avoids mixing failures into install steps — good practice.
-
-Your WSL README should keep:
-
-```md
 ## Possible Failures & Troubleshooting
 
+1. **Virtualization not enabled**
 
-With numbered scenarios, not paragraphs.
+   * Enable Intel VT-x / AMD-V in BIOS
 
+2. **WSL feature enablement fails**
 
-🔹 9. Recommendations / Best Practices (final section)
+   * Ensure administrator credentials are correct
 
-This aligns well with faasd “production mindset”.
+3. **Ubuntu install fails**
+
+   * Check internet connectivity
+   * Retry running `install.ps1`
+
+4. **Auto-start not working**
+
+   * Verify scheduled task exists
+   * Ensure Windows user logs in normally
 
 ---
 
-Windows Auto-Login (Optional)
+## Recommendations & Best Practices
 
-This section describes how to configure automatic Windows login for a dedicated service user so that WSL starts automatically after system boot.
+* Use a dedicated Windows user if WSL is meant to run as a service
+* Avoid running the installer permanently as Administrator
+* Do not modify phase boundaries unless you understand the privilege model
 
-Option 1: Auto-Login Using netplwiz
-Prerequisite
+---
 
-Windows Hello enforcement must be disabled.
+## Windows Auto-Login (Optional)
 
-Steps
+This section describes how to configure automatic Windows login for a dedicated
+service user so that WSL starts automatically after system boot.
 
-Open Settings
+### Option 1: Auto-Login Using netplwiz
 
-Go to:
+**Prerequisite**
 
-Accounts → Sign-in options
+* Windows Hello enforcement must be disabled
 
+**Steps**
 
-Under Additional settings, turn OFF:
+1. Open **Settings**
 
-For improved security, only allow Windows Hello sign-in for Microsoft accounts on this device
+2. Navigate to:
 
+   Accounts → Sign-in options
 
-Sign out or reboot
+3. Under **Additional settings**, turn OFF:
 
-Press Win + R
+   > For improved security, only allow Windows Hello sign-in for Microsoft accounts on this device
 
-Run:
+4. Sign out or reboot
 
-netplwiz
+5. Press **Win + R**, run:
 
+   ```
+   netplwiz
+   ```
 
-Select the service user
+6. Select the service user
 
-Uncheck:
+7. Uncheck:
 
-Users must enter a user name and password to use this computer
+   > Users must enter a user name and password to use this computer
 
+8. Click **Apply** and enter the password once
 
-Click Apply
-
-Enter the password once
-
-Reboot
+9. Reboot

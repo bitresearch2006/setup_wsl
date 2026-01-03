@@ -1,53 +1,88 @@
-# =========================================
-# WSL Uninstall / Cleanup Script
-# =========================================
+﻿# =========================================================
+# WSL Uninstaller – Safe, Symmetric with install.ps1
+#
+# DESIGN PRINCIPLES:
+# 1. User-owned resources removed as STANDARD USER
+# 2. System-wide features removed ONLY with admin approval
+# 3. No reboot unless features are disabled
+# =========================================================
 
-$STATE_FILE = "C:\ProgramData\wsl_setup_state.txt"
-$SETUP_TASK = "WSL-PostReboot-Setup"
-$AUTOSTART_TASK = "WSL-AutoStart"
-$DISTRO = "Ubuntu"
+$DISTRO     = "Ubuntu"
+$TASKS      = @("WSL-PostBoot", "WSL-AutoStart")
 
-Write-Host "=== WSL Cleanup Started ===" -ForegroundColor Yellow
+# ------------------------------
+# Helpers
+# ------------------------------
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $p  = New-Object Security.Principal.WindowsPrincipal($id)
+    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
 
-# Ensure running as Administrator
-if (-not ([Security.Principal.WindowsPrincipal]
-    [Security.Principal.WindowsIdentity]::GetCurrent()
-).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+function Remove-Task {
+    param($Name)
+    schtasks /delete /tn $Name /f 2>$null | Out-Null
+}
 
-    Write-Host "Re-launching uninstall script as Administrator..."
-    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+function Test-WSLFeaturesEnabled {
+    $wsl = dism /online /get-featureinfo /featurename:Microsoft-Windows-Subsystem-Linux |
+           Select-String "State : Enabled"
+    $vm  = dism /online /get-featureinfo /featurename:VirtualMachinePlatform |
+           Select-String "State : Enabled"
+    return ($wsl -and $vm)
+}
+
+# =========================================================
+# PHASE-1: USER OWNED CLEANUP (STANDARD USER)
+# =========================================================
+Write-Host "Removing user-owned WSL resources..."
+
+foreach ($task in $TASKS) {
+    Remove-Task $task
+    Write-Host "Removed task: $task"
+}
+
+$distros = wsl -l -q 2>$null
+if ($distros -contains $DISTRO) {
+    Write-Host "Unregistering WSL distro '$DISTRO'..."
+    wsl --unregister $DISTRO
+} else {
+    Write-Host "WSL distro '$DISTRO' not found (skipping)"
+}
+
+
+# =========================================================
+# ASK BEFORE SYSTEM-WIDE REMOVAL
+# =========================================================
+if (-not (Test-WSLFeaturesEnabled)) {
+    Write-Host "WSL system features already disabled."
     exit
 }
 
-# 1. Remove WSL auto-start task
-Write-Host "Removing WSL auto-start task..."
-schtasks /delete /tn $AUTOSTART_TASK /f 2>$null
-
-# 2. Remove post-reboot setup task (if exists)
-Write-Host "Removing post-reboot setup task..."
-schtasks /delete /tn $SETUP_TASK /f 2>$null
-
-# 3. Remove state file
-if (Test-Path $STATE_FILE) {
-    Write-Host "Removing state file..."
-    Remove-Item $STATE_FILE -Force
+$choice = Read-Host "Do you want to remove WSL system-wide features? (yes/no)"
+if ($choice -ne "yes") {
+    Write-Host "System-wide features retained. Uninstall completed."
+    exit
 }
 
-# 4. Shutdown WSL safely
-Write-Host "Shutting down WSL..."
-wsl --shutdown 2>$null
+# =========================================================
+# PHASE-2: SYSTEM FEATURE REMOVAL (ADMIN ONLY)
+# =========================================================
+if (-not (Test-IsAdmin)) {
 
-# 5. Optional: unregister distro
-$choice = Read-Host "Do you want to UNREGISTER the Ubuntu distro? (Y/N)"
+    Write-Host "Requesting admin approval to remove WSL system features..."
 
-if ($choice -match '^[Yy]$') {
-    Write-Host "Unregistering Ubuntu distro..."
-    wsl --unregister $DISTRO
-    Write-Host "Ubuntu distro removed."
-} else {
-    Write-Host "Ubuntu distro preserved."
+    Start-Process powershell `
+        -Verb RunAs `
+        -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`""
+
+    exit
 }
 
-Write-Host ""
-Write-Host "WSL cleanup completed successfully." -ForegroundColor Green
-Read-Host "Press ENTER to close this window"
+Write-Host "Disabling WSL system features..."
+
+dism.exe /online /disable-feature /featurename:Microsoft-Windows-Subsystem-Linux /norestart
+dism.exe /online /disable-feature /featurename:VirtualMachinePlatform /norestart
+
+Write-Host "System reboot required to complete uninstall."
+Restart-Computer -Force
