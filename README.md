@@ -95,7 +95,12 @@ After installation completes, verify the setup using the following checks.
 wsl -l -v
 ```
 
-Expected:
+## Confirm the task exists
+schtasks /query /tn WSL-AutoStart /v /fo list
+
+Verify Default User
+wsl
+whoami
 
 * Ubuntu is listed
 * Version is `2`
@@ -215,5 +220,9 @@ service user so that WSL starts automatically after system boot.
    > Users must enter a user name and password to use this computer
 
 8. Click **Apply** and enter the password once
+Click Apply
+
+Enter the password once
 
 9. Reboot
+
