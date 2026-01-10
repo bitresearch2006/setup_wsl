@@ -9,6 +9,10 @@
 #
 # DO NOT move Phase-2 code above the admin guard.
 # =========================================================
+param(
+    [string]$AdminAction
+)
+
 
 # ------------------------------
 # Globals
@@ -70,20 +74,46 @@ function Set-PhaseDone {
         -Force | Out-Null
 }
 
+function Clear-PhaseDone {
+    param([Parameter(Mandatory)][string]$Phase)
+
+    if (-not (Test-Path $STATE_KEY)) {
+        return
+    }
+
+    if (Get-ItemProperty -Path $STATE_KEY -Name $Phase -ErrorAction SilentlyContinue) {
+        Remove-ItemProperty -Path $STATE_KEY -Name $Phase -Force
+    }
+}
+
+
 # ------------------------------
 # Helpers
 # ------------------------------
 function Test-IsAdmin {
-    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $p  = New-Object Security.Principal.WindowsPrincipal($id)
-    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Get-DismFeatureState($FeatureName) {
-    $stateLine = dism /online /get-featureinfo /featurename:$FeatureName |
-                 Select-String "State :"
-    return ($stateLine -split ':')[1].Trim()
+
+function Get-DismFeatureState {
+    param([Parameter(Mandatory)][string]$FeatureName)
+
+    $output = dism /online /get-featureinfo /featurename:$FeatureName 2>$null
+    if (-not $output) {
+        return $null
+    }
+
+    $stateLine = $output | Select-String '^\s*State\s*:'
+
+    if (-not $stateLine) {
+        return $null
+    }
+
+    return ($stateLine -split ':', 2)[1].Trim()
 }
+
 
 function Test-WSLFeaturesEnabled {
 
@@ -119,7 +149,15 @@ function Phase1-Enable-WSLFeatures {
 # =========================================================
 # PHASE-1: SYSTEM FEATURE CHECK / ENABLE (ADMIN ONLY)
 # =========================================================
-    if (Test-IsAdmin -and -not (Test-WSLFeaturesEnabled)) {
+
+    Read-Host "Press ENTER to close this window"
+    if (-not (Test-IsAdmin)) {
+        Write-Log "PHASE-1: Required admin privilege"
+        return
+    }
+    $wsl_fea_status = Test-WSLFeaturesEnabled
+    Write-Log "WSL-feature status = '$wsl_fea_status'"
+    if (-not wsl_fea_status) {
 
         Write-Log "PHASE-1: WSL system features NOT enabled"
 
@@ -148,10 +186,8 @@ function Phase1-Enable-WSLFeatures {
             Read-Host "Press ENTER to close this window"
             exit 1
         }
+        Read-Host "Press ENTER to close this window"
 
-    }elseif (-not (Test-IsAdmin))
-    {
-        Write-Log "PHASE-1: Required admin privilege"
     }
     else
     {
@@ -229,16 +265,24 @@ function Invoke-AsAdmin {
 
     Write-Log "Requesting admin privileges for '$AdminAction'"
 
+    Write-Log("PS path '$PSCommandPath'")
+
     Start-Process powershell `
         -Verb RunAs `
-        -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`" -AdminAction $AdminAction"
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -AdminAction $AdminAction"
 
-    exit
+    exit 0
 }
- 
 
+ 
 Write-Log "SCRIPT STARTED"
 
+# Admin-only dispatch
+if ($AdminAction) {
+    Write-Log "ADMIN DISPATCH: Executing '$AdminAction'"
+    & $AdminAction
+    exit
+}
 
 # -------------------------------
 # Phase 1 – Admin only
