@@ -76,10 +76,14 @@ No WSL distro is installed in this phase.
 ### Phase 2 – User WSL Setup (Standard User)
 
 * Installs Ubuntu for the logged-in user
-* Prompts for Linux username and password
+* Prompts for Linux username only (no password is requested)
+* Creates the Linux user without a password
+* Sets the created user as the default WSL user
 * Removes post-boot resume task
 * Registers WSL auto-start at Windows login
 * Verifies installation
+
+The Linux password must be set manually after login using passwd inside WSL.
 
 This phase never runs in an admin-helper context.
 

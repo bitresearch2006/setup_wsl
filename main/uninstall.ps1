@@ -24,12 +24,21 @@ function Remove-Task {
     schtasks /delete /tn $Name /f 2>$null | Out-Null
 }
 
+function Get-DismFeatureState($FeatureName) {
+    $stateLine = dism /online /get-featureinfo /featurename:$FeatureName |
+                 Select-String "State :"
+    return ($stateLine -split ':')[1].Trim()
+}
+
 function Test-WSLFeaturesEnabled {
-    $wsl = dism /online /get-featureinfo /featurename:Microsoft-Windows-Subsystem-Linux |
-           Select-String "State : Enabled"
-    $vm  = dism /online /get-featureinfo /featurename:VirtualMachinePlatform |
-           Select-String "State : Enabled"
-    return ($wsl -and $vm)
+
+    $wslState = Get-DismFeatureState "Microsoft-Windows-Subsystem-Linux"
+    $vmState  = Get-DismFeatureState "VirtualMachinePlatform"
+
+    $validStates = @("Enabled", "Enable Pending")
+
+    return ($validStates -contains $wslState) -and
+           ($validStates -contains $vmState)
 }
 
 # =========================================================

@@ -1,4 +1,15 @@
-﻿
+﻿# =========================================================
+# WSL Installer – Phase-split, Parameter-free
+#
+# DESIGN PRINCIPLES:
+# 1. Script is always started by STANDARD USER
+# 2. Admin rights are used ONLY to enable system-wide WSL features
+# 3. WSL distro + tasks are ALWAYS created as STANDARD USER
+# 4. Phase-2 must NEVER run in admin context (hard enforced)
+#
+# DO NOT move Phase-2 code above the admin guard.
+# =========================================================
+
 # ------------------------------
 # Globals
 # ------------------------------
@@ -30,16 +41,34 @@ function Write-Log {
 $STATE_KEY = "HKCU:\Software\BitResearch\WSLSetup"
 
 function Get-PhaseDone {
-    param([string]$Phase)
-    (Get-ItemProperty -Path $STATE_KEY -Name $Phase -ErrorAction SilentlyContinue) -ne $null
+    param([Parameter(Mandatory)][string]$Phase)
+
+    if (-not (Test-Path $STATE_KEY)) {
+        return $false
+    }
+
+    try {
+        $value = Get-ItemPropertyValue -Path $STATE_KEY -Name $Phase -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
 }
+
 
 function Set-PhaseDone {
-    param([string]$Phase)
-    New-Item -Path $STATE_KEY -Force | Out-Null
-    New-ItemProperty -Path $STATE_KEY -Name $Phase -Value 1 -Force | Out-Null
-}
+    param([Parameter(Mandatory)][string]$Phase)
 
+    if (-not (Test-Path $STATE_KEY)) {
+        New-Item -Path $STATE_KEY -Force | Out-Null
+    }
+
+    New-ItemProperty -Path $STATE_KEY `
+        -Name $Phase `
+        -PropertyType DWORD `
+        -Value 1 `
+        -Force | Out-Null
+}
 
 # ------------------------------
 # Helpers
@@ -50,13 +79,23 @@ function Test-IsAdmin {
     return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Test-WSLFeaturesEnabled {
-    $wsl = dism /online /get-featureinfo /featurename:Microsoft-Windows-Subsystem-Linux |
-           Select-String "State : Enabled"
-    $vm  = dism /online /get-featureinfo /featurename:VirtualMachinePlatform |
-           Select-String "State : Enabled"
-    return ($wsl -and $vm)
+function Get-DismFeatureState($FeatureName) {
+    $stateLine = dism /online /get-featureinfo /featurename:$FeatureName |
+                 Select-String "State :"
+    return ($stateLine -split ':')[1].Trim()
 }
+
+function Test-WSLFeaturesEnabled {
+
+    $wslState = Get-DismFeatureState "Microsoft-Windows-Subsystem-Linux"
+    $vmState  = Get-DismFeatureState "VirtualMachinePlatform"
+
+    $validStates = @("Enabled", "Enable Pending")
+
+    return ($validStates -contains $wslState) -and
+           ($validStates -contains $vmState)
+}
+
 
 function Enable-WSLFeatures {
     dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
@@ -97,12 +136,17 @@ function Phase1-Enable-WSLFeatures {
         Write-Log "ADMIN: Enabling WSL system features"
         Enable-WSLFeatures
 
+        Set-PhaseDone "Phase1"
+
         Write-Log "ADMIN: Rebooting system (required)"
+        $choice = Read-Host "Reboot is required to continue setup. Reboot now? (Y/N)"
         if ($choice -match '^[Yy]$') {
             Write-Log "Rebooting system to continue setup..."
             Restart-Computer -Force
         } else {
-            Write-Log "Reboot skipped. Please reboot manually to complete setup by rerun this script after restart."
+            Write-Log "Reboot skipped. Please reboot manually to complete setup by rerun this script after restart, if script will not prompt automatically."
+            Read-Host "Press ENTER to close this window"
+            exit 1
         }
 
     }elseif (-not (Test-IsAdmin))
@@ -113,46 +157,45 @@ function Phase1-Enable-WSLFeatures {
     {
 
         Write-Log "PHASE-1: WSL system features already enabled"
+        Set-PhaseDone "Phase1"
     }
 
 }
 
-function Phase2-WSL-Setup
-{
-# =========================================================
-# PHASE-2: USER-OWNED WSL SETUP (STANDARD USER ONLY)
-# =========================================================
+
+function Phase2-WSL-Setup {
+
     Write-Log "PHASE-2: Starting user WSL setup"
 
     $distros = wsl -l -q 2>$null
-
     if ($distros -notcontains $DISTRO) {
         Write-Log "PHASE-2: Installing WSL distro '$DISTRO' for user"
         wsl --install -d $DISTRO
     } else {
         Write-Log "PHASE-2: WSL distro '$DISTRO' already installed"
     }
-    Write-Log "=== Phase 2: User Setup ===" -ForegroundColor Green
 
-    # Ask user credentials
+    Write-Log "=== Phase 2: User Setup ==="
+
     $LINUX_USER = Read-Host "Enter Linux username"
-    $PASSWORD_SECURE = Read-Host "Enter Linux password" -AsSecureString
     if ([string]::IsNullOrWhiteSpace($LINUX_USER)) {
-        Write-Log "Linux username cannot be empty." -ForegroundColor Red
+        Write-Log "Linux username cannot be empty."
+        Write-Log "Restart or rerun the same script to contiue"
+        Read-Host "Press ENTER to close this window"
         exit 1
     }
-    $PASSWORD_PLAIN = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($PASSWORD_SECURE)
-    )
 
-    # Create Linux user
-    $USER_LINE = "$LINUX_USER`:$PASSWORD_PLAIN"
+$cmd = "useradd -m -s /bin/bash $LINUX_USER 2>/dev/null || true; " +
+       "usermod -aG sudo $LINUX_USER; " +
+       "passwd -d $LINUX_USER; " +
+       "printf '[user]\ndefault=%s\n' '$LINUX_USER' > /etc/wsl.conf"
 
-    wsl -d Ubuntu -- bash -c "id $LINUX_USER >/dev/null 2>&1 || useradd -m -s /bin/bash $LINUX_USER && echo '$USER_LINE' | chpasswd && usermod -aG sudo $LINUX_USER"
+    wsl -d Ubuntu -u root -- bash -c "$cmd"
 
-    # Set default WSL user
-    wsl -d Ubuntu -- bash -c "printf '[user]\ndefault=%s\n' '$LINUX_USER' > /etc/wsl.conf"
+    Write-Log "Then user sets password on first login: by enter passwd in WSl"
+
 }
+
 
 function Phase3-Register-WSLAutoStart{
 # =========================================================
@@ -196,38 +239,41 @@ function Invoke-AsAdmin {
 
 Write-Log "SCRIPT STARTED"
 
-# -------------------------------
-# AdminAction DISPATCH MODE
-# -------------------------------
-# -------------------------------
-# AdminAction DISPATCH MODE
-# -------------------------------
 
-if (-not (Get-PhaseDone)) {
-    # Phase 1 – Admin only
+# -------------------------------
+# Phase 1 – Admin only
+# -------------------------------
+if (-not (Get-PhaseDone "Phase1")) {
+
     Invoke-AsAdmin Phase1-Enable-WSLFeatures
 
-    & powershell.exe -ExecutionPolicy Bypass -File "$PSCommandPath"
+    # Relaunch ONLY if Phase1 completed (post-reboot)
+    if (Get-PhaseDone "Phase1") {
+        & powershell.exe -ExecutionPolicy Bypass -File "$PSCommandPath"
+    }
     exit
-}else{
-    Set-PhaseDone "Phase1"
 }
 
-if ((Get-PhaseDone) -eq "Phase1") {
+# -------------------------------
+# Phase 2 – Standard user
+# -------------------------------
+if ((Get-PhaseDone "Phase1") -and (-not (Get-PhaseDone "Phase2"))) {
 
-
-    # Phase 2 – Standard user
     Phase2-WSL-Setup
     Set-PhaseDone "Phase2"
-
 }
 
-if ((Get-PhaseDone) -eq "Phase2") {
-    # Phase 3 – Admin only
-    Invoke-AsAdmin Phase3-Register-WSLAutoStart
+# -------------------------------
+# Phase 3 – Admin only
+# -------------------------------
+if ((Get-PhaseDone "Phase2") -and (-not (Get-PhaseDone "Phase3"))) {
 
+    Invoke-AsAdmin Phase3-Register-WSLAutoStart
+    # Cleanup state after success
     Remove-Item -Recurse -Force $STATE_KEY
+    Set-PhaseDone "Phase3"
     Read-Host "Press ENTER to close this window"
 }
+
 
 
