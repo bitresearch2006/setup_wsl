@@ -1,5 +1,5 @@
 ﻿# =========================================================
-# WSL Installer – Phase-split, Parameter-free
+# WSL Installer – Phase-split, Parameter-free   
 #
 # DESIGN PRINCIPLES:
 # 1. Script is always started by STANDARD USER
@@ -9,17 +9,20 @@
 #
 # DO NOT move Phase-2 code above the admin guard.
 # =========================================================
-param(
-    [string]$AdminAction
-)
 
 
 # ------------------------------
 # Globals
 # ------------------------------
-$DISTRO     = "Ubuntu"
+
 $TASK_NAME  = "WSL-PostBoot"
 $SCRIPT     = $PSCommandPath
+$STATE_KEY = "HKCU:\Software\BitResearch\WSLSetup"
+$DISTRO	= "Select Distribution"
+
+if (-not (Test-Path $STATE_KEY)) {
+    New-Item -Path $STATE_KEY -Force | Out-Null
+}
 
 # ------------------------------
 # Logging
@@ -42,7 +45,44 @@ function Write-Log {
     Write-Host "$ts [$env:USERNAME] [$Level] $Message" -ForegroundColor $color
 }
 
-$STATE_KEY = "HKCU:\Software\BitResearch\WSLSetup"
+function Select-WSLDistro {
+
+    $distros = wsl --list --online --quiet
+
+    if (-not $distros) {
+        Write-Error "No WSL distributions available."
+        exit 1
+    }
+
+    Write-Log "`nAvailable WSL Distributions:`n"
+    for ($i = 0; $i -lt $distros.Count; $i++) {
+        Write-Log "[$($i+1)] $($distros[$i])"
+    }
+
+    do {
+        $choice = Read-Host "`nSelect distro number"
+    } while ($choice -notmatch '^\d+$' -or
+             $choice -lt 1 -or
+             $choice -gt $distros.Count)
+
+    $rawChoice = $distros[$choice - 1]
+    $distro    = $rawChoice.Trim().Split()[0]
+    $distro = [System.Text.Encoding]::Unicode.GetString(
+                [System.Text.Encoding]::Unicode.GetBytes($distro)
+            )
+
+    $distro = ($distro -replace '[^\x20-\x7E]', '').Trim()
+
+
+
+    Write-Log "Selected raw   = $rawChoice"
+    Write-Log "Selected clean = $distro"
+    Write-Log "DISTRO length = $($distro.Length)"
+
+    return $distro
+}
+
+
 
 function Get-PhaseDone {
     param([Parameter(Mandatory)][string]$Phase)
@@ -141,7 +181,7 @@ function Remove-PostBootTask {
 }
 
 function Register-WSLAutoStart {
-    schtasks /create /tn "WSL-AutoStart" /tr "wsl -d Ubuntu -e true" /sc onlogon /ru "$env:USERNAME" /rl HIGHEST /f
+    schtasks /create /tn "WSL-AutoStart" /tr "wsl -d $DISTRO -e true" /sc onlogon /ru "$env:USERNAME" /rl HIGHEST /f
 
 }
 
@@ -150,14 +190,15 @@ function Phase1-Enable-WSLFeatures {
 # PHASE-1: SYSTEM FEATURE CHECK / ENABLE (ADMIN ONLY)
 # =========================================================
 
-    Read-Host "Press ENTER to close this window"
     if (-not (Test-IsAdmin)) {
         Write-Log "PHASE-1: Required admin privilege"
         return
     }
+
+
     $wsl_fea_status = Test-WSLFeaturesEnabled
     Write-Log "WSL-feature status = '$wsl_fea_status'"
-    if (-not wsl_fea_status) {
+    if (-not ($wsl_fea_status)) {
 
         Write-Log "PHASE-1: WSL system features NOT enabled"
 
@@ -206,7 +247,9 @@ function Phase2-WSL-Setup {
     $distros = wsl -l -q 2>$null
     if ($distros -notcontains $DISTRO) {
         Write-Log "PHASE-2: Installing WSL distro '$DISTRO' for user"
-        wsl --install -d $DISTRO
+	Write-Host "$DISTRO"
+        wsl --install $DISTRO --no-launch
+	#wsl --install Ubuntu-20.04 --no-launch
     } else {
         Write-Log "PHASE-2: WSL distro '$DISTRO' already installed"
     }
@@ -226,7 +269,7 @@ $cmd = "useradd -m -s /bin/bash $LINUX_USER 2>/dev/null || true; " +
        "passwd -d $LINUX_USER; " +
        "printf '[user]\ndefault=%s\n' '$LINUX_USER' > /etc/wsl.conf"
 
-    wsl -d Ubuntu -u root -- bash -c "$cmd"
+    wsl -d $DISTRO -u root -- bash -c "$cmd"
 
     Write-Log "Then user sets password on first login: by enter passwd in WSl"
 
@@ -251,37 +294,19 @@ function Phase3-Register-WSLAutoStart{
     }    
 }
 
-function Invoke-AsAdmin {
-    param(
-        [Parameter(Mandatory)]
-        [string]$AdminAction
-    )
-
-    if (Test-IsAdmin) {
-        Write-Log "Already admin, executing '$AdminAction'"
-        & $AdminAction
-        return
-    }
-
-    Write-Log "Requesting admin privileges for '$AdminAction'"
-
-    Write-Log("PS path '$PSCommandPath'")
-
-    Start-Process powershell `
-        -Verb RunAs `
-        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -AdminAction $AdminAction"
-
-    exit 0
+if (-not (Test-IsAdmin)) {
+    Write-Log "[ERROR] This script must be run as Administrator."
+    Write-Log "Please right-click PowerShell and choose 'Run as administrator'."
+    exit 1
 }
-
- 
 Write-Log "SCRIPT STARTED"
 
-# Admin-only dispatch
-if ($AdminAction) {
-    Write-Log "ADMIN DISPATCH: Executing '$AdminAction'"
-    & $AdminAction
-    exit
+if (-not (Get-ItemProperty -Path $STATE_KEY -Name "DISTRO" -ErrorAction SilentlyContinue)) {
+    $DISTRO = Select-WSLDistro
+    Set-ItemProperty -Path $STATE_KEY -Name "DISTRO" -Value $DISTRO
+}
+else {
+    $DISTRO = (Get-ItemProperty -Path $STATE_KEY).DISTRO
 }
 
 # -------------------------------
@@ -289,17 +314,11 @@ if ($AdminAction) {
 # -------------------------------
 if (-not (Get-PhaseDone "Phase1")) {
 
-    Invoke-AsAdmin Phase1-Enable-WSLFeatures
-
-    # Relaunch ONLY if Phase1 completed (post-reboot)
-    if (Get-PhaseDone "Phase1") {
-        & powershell.exe -ExecutionPolicy Bypass -File "$PSCommandPath"
-    }
-    exit
+    Phase1-Enable-WSLFeatures
 }
 
 # -------------------------------
-# Phase 2 – Standard user
+# Phase 2 – Standard user also fine
 # -------------------------------
 if ((Get-PhaseDone "Phase1") -and (-not (Get-PhaseDone "Phase2"))) {
 
@@ -312,7 +331,7 @@ if ((Get-PhaseDone "Phase1") -and (-not (Get-PhaseDone "Phase2"))) {
 # -------------------------------
 if ((Get-PhaseDone "Phase2") -and (-not (Get-PhaseDone "Phase3"))) {
 
-    Invoke-AsAdmin Phase3-Register-WSLAutoStart
+    Phase3-Register-WSLAutoStart
     # Cleanup state after success
     Remove-Item -Recurse -Force $STATE_KEY
     Set-PhaseDone "Phase3"
