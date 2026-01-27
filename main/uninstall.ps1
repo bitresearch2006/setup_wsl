@@ -41,6 +41,46 @@ function Test-WSLFeaturesEnabled {
            ($validStates -contains $vmState)
 }
 
+function Select-InstalledWSLDistro {
+
+    $distros = wsl -l -q
+
+    if (-not $distros -or $distros.Count -eq 0) {
+        Write-Host "No WSL distributions installed."
+        return $null
+    }
+
+    Write-Host "Installed WSL Distributions:"
+    Write-Host "[0] Keep Distribution"
+
+    for ($i = 0; $i -lt $distros.Count; $i++) {
+        Write-Host "[$($i+1)] $($distros[$i])"
+    }
+
+    $choice = Read-Host "Select distro number to use"
+
+    if ($choice -eq "0") {
+        return "KEEP"
+    }
+
+    if (-not ($choice -as [int]) -or
+        $choice -lt 1 -or
+        $choice -gt $distros.Count) {
+        Write-Host "Invalid selection."
+        return $null
+    }
+
+    
+    $rawChoice = $distros[$choice - 1]
+    $distro    = $rawChoice.Trim().Split()[0]
+    $distro = [System.Text.Encoding]::Unicode.GetString(
+                [System.Text.Encoding]::Unicode.GetBytes($distro)
+            )
+
+    $distro = ($distro -replace '[^\x20-\x7E]', '').Trim()    
+    return $distro
+}
+
 # =========================================================
 # PHASE-1: USER OWNED CLEANUP (STANDARD USER)
 # =========================================================
@@ -51,12 +91,23 @@ foreach ($task in $TASKS) {
     Write-Host "Removed task: $task"
 }
 
-$distros = wsl -l -q 2>$null
-if ($distros -contains $DISTRO) {
-    Write-Host "Unregistering WSL distro '$DISTRO'..."
-    wsl --unregister $DISTRO
-} else {
-    Write-Host "WSL distro '$DISTRO' not found (skipping)"
+$DISTRO = Select-InstalledWSLDistro
+
+Write-host "Selected $DISTRO"
+if ($DISTRO -eq "KEEP") {
+    Write-Host "No distro selected. continue next"
+}
+else{
+    Write-Host "Using WSL distro '$DISTRO'"
+
+
+    $distros = wsl -l -q 2>$null
+    if ($distros -contains $DISTRO) {
+        Write-Host "Unregistering WSL distro '$DISTRO'..."
+        wsl --unregister $DISTRO
+    } else {
+        Write-Host "WSL distro '$DISTRO' not found (skipping)"
+    }
 }
 
 

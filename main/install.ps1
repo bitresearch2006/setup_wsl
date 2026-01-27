@@ -76,8 +76,8 @@ function Select-WSLDistro {
 
 
     Write-Log "Selected raw   = $rawChoice"
-    Write-Log "Selected clean = $distro"
     Write-Log "DISTRO length = $($distro.Length)"
+
 
     return $distro
 }
@@ -185,6 +185,37 @@ function Register-WSLAutoStart {
 
 }
 
+function print-test-msg {
+    $phase=(Get-PhaseDone "Phase1") 
+    Write-Log "Phase1=$phase"
+    $phase=(Get-PhaseDone "Phase2") 
+    Write-Log "Phase2=$phase"
+    $phase=(Get-PhaseDone "Phase3") 
+    Write-Log "Phase3=$phase"
+    Read-Host "Press ENTER to continue this window"
+}
+
+function Register-Task-Logon-Restart {
+        Write-Log "ADMIN: Rebooting system (required)"
+        $choice = Read-Host "Reboot is required to continue setup. Reboot now? (Y/N)"
+        if ($choice -match '^[Yy]$') {
+            # -----------------------------------------------------
+            # This admin process is allowed to do ONLY:
+            #   - Enable WSL features
+            #   - Reboot
+            # -----------------------------------------------------     
+            Register-PostBootTask
+
+            Write-Log "Rebooting system to continue setup..."
+            Restart-Computer -Force
+        } else {
+            Write-Log "Reboot skipped. Please reboot manually to complete setup by rerun this script after restart, if script will not prompt automatically."
+            Read-Host "Press ENTER to close this window"
+            exit 1
+        }
+
+}
+
 function Phase1-Enable-WSLFeatures {
 # =========================================================
 # PHASE-1: SYSTEM FEATURE CHECK / ENABLE (ADMIN ONLY)
@@ -202,13 +233,7 @@ function Phase1-Enable-WSLFeatures {
 
         Write-Log "PHASE-1: WSL system features NOT enabled"
 
-        # -----------------------------------------------------
-        # This admin process is allowed to do ONLY:
-        #   - Enable WSL features
-        #   - Reboot
-        # -----------------------------------------------------
-        
-        Register-PostBootTask
+
         # -----------------------------------------------------
         # ADMIN CONTEXT (HARD-LIMITED SECTION)
         # -----------------------------------------------------
@@ -217,17 +242,8 @@ function Phase1-Enable-WSLFeatures {
 
         Set-PhaseDone "Phase1"
 
-        Write-Log "ADMIN: Rebooting system (required)"
-        $choice = Read-Host "Reboot is required to continue setup. Reboot now? (Y/N)"
-        if ($choice -match '^[Yy]$') {
-            Write-Log "Rebooting system to continue setup..."
-            Restart-Computer -Force
-        } else {
-            Write-Log "Reboot skipped. Please reboot manually to complete setup by rerun this script after restart, if script will not prompt automatically."
-            Read-Host "Press ENTER to close this window"
-            exit 1
-        }
-        Read-Host "Press ENTER to close this window"
+        Register-Task-Logon-Restart
+
 
     }
     else
@@ -247,31 +263,30 @@ function Phase2-WSL-Setup {
     $distros = wsl -l -q 2>$null
     if ($distros -notcontains $DISTRO) {
         Write-Log "PHASE-2: Installing WSL distro '$DISTRO' for user"
-	Write-Host "$DISTRO"
-        wsl --install $DISTRO --no-launch
-	#wsl --install Ubuntu-20.04 --no-launch
+        Write-Host "$DISTRO"
+        Set-PhaseDone "Phase2"
+        Write-Host ""
+        Write-Log "Type 'exit' in Linux to gohead further steps"
+        Write-Host ""
+        # wsl --install $DISTRO
+        Start-Process powershell -ArgumentList "-Command", "wsl --install $DISTRO"
+        #Start-Process powershell -ArgumentList "-Command", "echo"
+        print-test-msg
+        Register-Task-Logon-Restart  
+        exit
+
+        Write-Log "Waiting for WSL distro to register..."
+        while ($true) {
+            $list = wsl -l -q 2>$null
+            if ($list -contains $DISTRO) { break }
+            Start-Sleep 2
+        }
+
+        Write-Log "Waiting for WSL first boot..."
+        wsl -d $DISTRO -- echo "ready"
     } else {
         Write-Log "PHASE-2: WSL distro '$DISTRO' already installed"
     }
-
-    Write-Log "=== Phase 2: User Setup ==="
-
-    $LINUX_USER = Read-Host "Enter Linux username"
-    if ([string]::IsNullOrWhiteSpace($LINUX_USER)) {
-        Write-Log "Linux username cannot be empty."
-        Write-Log "Restart or rerun the same script to contiue"
-        Read-Host "Press ENTER to close this window"
-        exit 1
-    }
-
-$cmd = "useradd -m -s /bin/bash $LINUX_USER 2>/dev/null || true; " +
-       "usermod -aG sudo $LINUX_USER; " +
-       "passwd -d $LINUX_USER; " +
-       "printf '[user]\ndefault=%s\n' '$LINUX_USER' > /etc/wsl.conf"
-
-    wsl -d $DISTRO -u root -- bash -c "$cmd"
-
-    Write-Log "Then user sets password on first login: by enter passwd in WSl"
 
 }
 
@@ -300,7 +315,13 @@ if (-not (Test-IsAdmin)) {
     exit 1
 }
 Write-Log "SCRIPT STARTED"
-
+if ((Get-PhaseDone "Phase1") -and (Get-PhaseDone "Phase2") -and (Get-PhaseDone "Phase3"))
+{
+    Remove-Item -Recurse -Force $STATE_KEY
+    if (-not (Test-Path $STATE_KEY)) {
+       New-Item -Path $STATE_KEY -Force | Out-Null
+    }
+}
 if (-not (Get-ItemProperty -Path $STATE_KEY -Name "DISTRO" -ErrorAction SilentlyContinue)) {
     $DISTRO = Select-WSLDistro
     Set-ItemProperty -Path $STATE_KEY -Name "DISTRO" -Value $DISTRO
@@ -309,6 +330,9 @@ else {
     $DISTRO = (Get-ItemProperty -Path $STATE_KEY).DISTRO
 }
 
+
+    Write-Log $DISTRO
+    print-test-msg
 # -------------------------------
 # Phase 1 – Admin only
 # -------------------------------
@@ -323,7 +347,11 @@ if (-not (Get-PhaseDone "Phase1")) {
 if ((Get-PhaseDone "Phase1") -and (-not (Get-PhaseDone "Phase2"))) {
 
     Phase2-WSL-Setup
-    Set-PhaseDone "Phase2"
+    if ((Get-PhaseDone "Phase1") -and (-not (Get-PhaseDone "Phase2"))) {
+        Set-PhaseDone "Phase2"
+        print-test-msg
+    }
+
 }
 
 # -------------------------------
