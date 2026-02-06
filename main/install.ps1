@@ -181,8 +181,7 @@ function Remove-PostBootTask {
 }
 
 function Register-WSLAutoStart {
-    schtasks /create /tn "WSL-AutoStart" /tr "wsl -d $DISTRO -e true" /sc onlogon /ru "$env:USERNAME" /rl HIGHEST /f
-
+    schtasks /create /tn "WSL-AutoStart" /tr "\"C:\Windows\System32\wsl.exe\" -d %DISTRO% -- echo start" /sc onstart /ru SYSTEM /rl HIGHEST /f
 }
 
 function print-test-msg {
