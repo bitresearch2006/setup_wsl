@@ -181,7 +181,27 @@ function Remove-PostBootTask {
 }
 
 function Register-WSLAutoStart {
-    schtasks /create /tn "WSL-AutoStart" /tr "\"C:\Windows\System32\wsl.exe\" -d %DISTRO% -- echo start" /sc onstart /ru SYSTEM /rl HIGHEST /f
+    $action = New-ScheduledTaskAction `
+        -Execute "cmd.exe" `
+        -Argument '/c start "" "C:\Windows\System32\wsl.exe" -d ubuntu-22.04 -e sh -c "sleep 28800"'
+
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $trigger.Delay = "PT10S"
+
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable
+
+    Register-ScheduledTask `
+        -TaskName "WSL-AutoStart" `
+        -Action $action `
+        -Trigger $trigger `
+        -Settings $settings `
+        -User "$env:USERNAME" `
+        -RunLevel Highest `
+        -Force
+
 }
 
 function print-test-msg {
