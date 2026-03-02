@@ -181,12 +181,13 @@ function Remove-PostBootTask {
 }
 
 function Register-WSLAutoStart {
+
     $action = New-ScheduledTaskAction `
         -Execute "cmd.exe" `
-        -Argument '/c start "" "C:\Windows\System32\wsl.exe" -d ubuntu-22.04 -e sh -c "sleep 28800"'
+        -Argument '/c start "" "C:\Windows\System32\wsl.exe" -d ubuntu-22.04 --exec sleep 28800'
 
     $trigger = New-ScheduledTaskTrigger -AtStartup
-    $trigger.Delay = "PT10S"
+    $trigger.Delay = "PT30S"
 
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries `
@@ -201,7 +202,6 @@ function Register-WSLAutoStart {
         -User "$env:USERNAME" `
         -RunLevel Highest `
         -Force
-
 }
 
 function print-test-msg {
