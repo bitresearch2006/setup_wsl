@@ -186,7 +186,7 @@ function Register-WSLAutoStart {
         -Execute "cmd.exe" `
         -Argument '/c start "" "C:\Windows\System32\wsl.exe" -d ubuntu-22.04 --exec sleep 28800'
 
-    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $trigger = New-ScheduledTaskTrigger -AtLogOn # Changed from AtStartup to AtLogOn
     $trigger.Delay = "PT30S"
 
     $settings = New-ScheduledTaskSettingsSet `
