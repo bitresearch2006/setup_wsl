@@ -182,9 +182,11 @@ function Remove-PostBootTask {
 
 function Register-WSLAutoStart {
 
+    $cmd = "/c start `"`" C:\Windows\System32\wsl.exe -d $DISTRO --exec sleep 28800"
+
     $action = New-ScheduledTaskAction `
         -Execute "cmd.exe" `
-        -Argument "/c start "" ""C:\Windows\System32\wsl.exe"" -d $DISTRO --exec sleep 28800"
+        -Argument $cmd
 
     $trigger = New-ScheduledTaskTrigger -AtLogOn # Changed from AtStartup to AtLogOn
     $trigger.Delay = "PT30S"
